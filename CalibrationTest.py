@@ -31,8 +31,8 @@ objp=np.zeros((6*7,3),np.float32)
 objp[:,:2]=np.mgrid[0:7,0:6].T.reshape(-1,2)
 objpoints=[]
 imgpoints=[]
-images=glob.glob('CalibrationSerban/Frame*.jpg')
-print(images[0])
+images=glob.glob('CalibrationSerban/Worked/Frame*.jpg')
+print(images)
 for fname in images:
     img=cv2.imread(fname)
     gray2=cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
@@ -41,20 +41,21 @@ for fname in images:
     #cv2.waitKey(500)
     #cv2.destroyAllWindows()
     ret, corners=cv2.findChessboardCorners(gray2,(7,6),None)
-    
+    print("Checking " + fname)
     if ret == True:
         objpoints.append(objp)
-        print(fname)
+        print("Worked for "+ fname)
         print('index: '+str(index))
         corners2=cv2.cornerSubPix(gray2,corners,(11,11),(-1,-1),criteria)
         imgpoints.append(corners2)
         img2=img.copy()
         img2=cv2.drawChessboardCorners(img2,(7,6),corners2,ret)
-        #cv2.imshow('img', img2)
+        img3=cv2.resize(img2,(len(img2[0])//2,len(img2)//2))
+        cv2.imshow('img', img3)
         index+=1
         #cv2.imwrite('ChessboardWorkingInitial'+str(index)+'.jpg',img)
-        #cv2.imwrite('ChessboardWorkingDrawn'+str(index)+'.jpg',img2)
-        #cv2.waitKey(500)
+        cv2.imwrite('ChessboardWorkingDrawn'+str(index)+'.jpg',img2)
+        cv2.waitKey(500)
         #cv2.destroyAllWindows()
         
         
@@ -65,9 +66,9 @@ for fname in images:
     newcameramtx, roi=cv2.getOptimalNewCameraMatrix(mtx,dist,(w,h),1,(w,h))
     dst=cv2.undistort(img,mtx,dist,None,newcameramtx)
     x,y,w,h=roi
-    dst=dst[y:y+h,x:x+w]
+    #dst=dst[y:y+h,x:x+w]
     number=extractNumberFrom(fname)
-    #cv2.imwrite('ChessboardUndistorted'+str(number)+'.jpg',dst)
+    cv2.imwrite('CalibrationSerban/Worked/ChessboardUndistorted'+str(number)+'.jpg',dst)
 
 print('Done')
 cv2.destroyAllWindows()
