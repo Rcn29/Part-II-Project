@@ -25,18 +25,25 @@ def extractNumberFrom(fileName):
     return nr
 
 index=0
-bgr=glob.glob('/home/pi/Background.jpg')
+bgr=glob.glob('/home/pi/Phone_Background.jpg')
 background=cv2.imread(bgr[0])
 grayground=cv2.cvtColor(background,cv2.COLOR_BGR2GRAY)
-images=glob.glob('/home/pi/FrameNumber*.jpg')
+images=glob.glob('/home/pi/Phone_Picture1.jpg')
 for fname in images:
     img=cv2.imread(fname)
     gray=cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
-    gray=gray-grayground
-    edges=cv2.Canny(img,50,120)
+    t0=time.time()
+    #gray=gray-grayground
+    for i in range(2464):
+        for j in range(3280):
+            gray[i][j]=int(gray[i][j])-int(grayground[i][j])
+            
+    t1=time.time()
+    print(t1-t0)
+    edges=cv2.Canny(gray,50,120)
     index=extractNumberFrom(fname)
-    cv2.imwrite('GrayFrameNumber'+str(index)+'.jpg',gray)
-    cv2.imwrite('EdgeFrameNumber'+str(index)+'.jpg',edges)
+    #cv2.imwrite('GrayNoBackgroundPhonePhoto'+str(index)+'.jpg',gray)
+    #cv2.imwrite('EdgePhonePhoto'+str(index)+'.jpg',edges)
     plt.subplot(121),plt.imshow(gray,cmap='gray')
     plt.title('Original grayscale image'),plt.xticks([]),plt.yticks([])
     plt.subplot(122),plt.imshow(edges,cmap='gray')

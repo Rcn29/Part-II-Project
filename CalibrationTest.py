@@ -31,7 +31,7 @@ objp=np.zeros((6*7,3),np.float32)
 objp[:,:2]=np.mgrid[0:7,0:6].T.reshape(-1,2)
 objpoints=[]
 imgpoints=[]
-images=glob.glob('/home/pi/WorkedCalibration/ChessboardWorkingInitial*.jpg')
+images=glob.glob('CalibrationSerban/Frame*.jpg')
 print(images[0])
 for fname in images:
     img=cv2.imread(fname)
@@ -67,7 +67,7 @@ for fname in images:
     x,y,w,h=roi
     dst=dst[y:y+h,x:x+w]
     number=extractNumberFrom(fname)
-    cv2.imwrite('ChessboardUndistorted'+str(number)+'.jpg',dst)
+    #cv2.imwrite('ChessboardUndistorted'+str(number)+'.jpg',dst)
 
 print('Done')
 cv2.destroyAllWindows()
