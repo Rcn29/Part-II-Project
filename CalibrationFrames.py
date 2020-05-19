@@ -33,6 +33,8 @@ for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=
     print("Captured "+str(index))
     
     cv2.imwrite("CalibrationSerban/Frame"+str(index)+".jpg",image)
+    cv2.imshow("Image",image)
+    cv2.waitKey(500)
     rawCapture.truncate(0)
     if index==50:
         break

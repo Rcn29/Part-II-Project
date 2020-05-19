@@ -36,7 +36,7 @@ rawCapture = PiRGBArray(camera, size=(640, 480))
 time.sleep(0.1)
 
 cv2.namedWindow("Frame")
-cannyMin = 80
+cannyMin = 50
 cannyMax = 140
 def trackMin(v) :
     global cannyMin
@@ -47,7 +47,7 @@ def trackMax(v) :
 #cv2.createTrackbar("Canny Min", "Frame" , cannyMin, 500, trackMin)
 #cv2.createTrackbar("Canny Max", "Frame" , cannyMax, 500, trackMax)
 
-backSub=cv2.createBackgroundSubtractorMOG2()
+backSub=cv2.createBackgroundSubtractorKNN()
 prevImage = None
 motionHist = None
 prevImage16 = None
@@ -60,7 +60,7 @@ for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=
     # and occupied/unoccupied text
     image = frame.array
     t0=time.time()
-    image = cv2.flip(image, -1)
+    image = cv2.flip(image, 0)
     imageH = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     imageH = imageH[:,:,2]
     image = imageH
@@ -102,52 +102,15 @@ for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=
     #todo: crop image to select only moving parts
     image = cv2.Canny(image,cannyMin,cannyMax)
     #ret, image = cv2.threshold(image, 15, 255, cv2.THRESH_BINARY)
-    cont, hierarchy = cv2.findContours(image, cv2.RETR_LIST, cv2.CHAIN_APPROX_TC89_L1)
-    fingers = []
-    maxPts = 0
-    for points in cont:
-        if len(cont) > 35: break
-        maxPts = max(maxPts, len(points))
-        if len(points) > 100: break
-        if len(points) < 2: continue
-        
-        isFinger = True
-        length = 0.0
-        for i,pt in enumerate(points):
-            if i < 2:
-                continue
-            a = (points[i - 1] - points[i-2])[0]
-            alen = np.linalg.norm(a)
-            a = a / alen
-            b = (points[i - 1] - points[i])[0]
-            blen = np.linalg.norm(b)
-            b = b / blen
-            if abs(np.dot(a,b)) > 0.9:
-                length += alen + blen
-                isFinger = True
-                break
-        if length > 2 and length < 8:                
-            #find finger-like point sequences
-            #print(points)
-            fingers.append(points)
-    print( len(cont), maxPts)
-    for idx,fgr in enumerate(cont):
-        image = cv2.drawContours(image, cont, idx, (64 + 16 * idx), 2)
-        
-    lines = cv2.HoughLinesP(image, 4, np.pi / 180, 15, None, 2, 2)
-    if False and lines is not None:
-        for line in lines:
-            for x1,y1,x2,y2 in line:
-                cv2.line(image, (x1,y1), (x2,y2), (64), 2)
-    
-    #circles=cv2.HoughCircles(image,cv2.HOUGH_GRADIENT, 1.6, 20,param1=cannyMin*2,param2=35,maxRadius=20)
-    #if circles is not None:
-    #    circles=np.round(circles[0,:]).astype("int")
-    #    print("Found circles")
-    #    for (x, y, r) in circles:
-    #        cv2.circle(image,(x,y),r,(64),4)
-    #        cv2.rectangle(image,(x-5,y-5),(x+5,y+5),(255),-1)
-      
+    """
+    circles=cv2.HoughCircles(image,cv2.HOUGH_GRADIENT, 1.4, 20,param1=cannyMin*2,param2=20,maxRadius=20)
+    if circles is not None:
+        circles=np.round(circles[0,:]).astype("int")
+        #print("Found circles")
+        for (x, y, r) in circles:
+            cv2.circle(image,(x,y),r,(64),4)
+            cv2.rectangle(image,(x-5,y-5),(x+5,y+5),(255),-1)
+    """
     t1=time.time()
     print(str(t1-t0))
     # show the frame
@@ -167,4 +130,5 @@ for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=
     if key == ord("q"):
         break
 cv2.destroyAllWindows()
+
 

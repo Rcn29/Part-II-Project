@@ -17,58 +17,88 @@ def extractNumberFrom(fileName):
     i=0
     while not fileName[i].isdigit() and i<len(fileName):
         i+=1
-        
+
     while fileName[i].isdigit() and i<len(fileName):
         nr*=10
         nr+=int(fileName[i])
         i+=1
-        
+
     return nr
     
-index=0
-criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
-objp=np.zeros((6*7,3),np.float32)
-objp[:,:2]=np.mgrid[0:7,0:6].T.reshape(-1,2)
-objpoints=[]
-imgpoints=[]
+    
 images=glob.glob('CalibrationSerban/Worked/Frame*.jpg')
 print(images)
-for fname in images:
-    img=cv2.imread(fname)
-    gray2=cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
-    #print(gray2)
-    #cv2.imshow('gray2',gray2)
-    #cv2.waitKey(500)
-    #cv2.destroyAllWindows()
-    ret, corners=cv2.findChessboardCorners(gray2,(7,6),None)
-    print("Checking " + fname)
-    if ret == True:
-        objpoints.append(objp)
-        print("Worked for "+ fname)
-        print('index: '+str(index))
-        corners2=cv2.cornerSubPix(gray2,corners,(11,11),(-1,-1),criteria)
-        imgpoints.append(corners2)
-        img2=img.copy()
-        img2=cv2.drawChessboardCorners(img2,(7,6),corners2,ret)
-        img3=cv2.resize(img2,(len(img2[0])//2,len(img2)//2))
-        cv2.imshow('img', img3)
-        index+=1
-        #cv2.imwrite('ChessboardWorkingInitial'+str(index)+'.jpg',img)
-        cv2.imwrite('ChessboardWorkingDrawn'+str(index)+'.jpg',img2)
-        cv2.waitKey(500)
+    
+objpoints=None
+imgpoints=None
+w=1280#1920 #for the input image
+h=720#1080
+print(w,h)
+force=False
+try:
+    with np.load("calib_serban.npz") as savedPoints:
+        objpoints = savedPoints["obj"]
+        imgpoints = savedPoints["img"]
+        #w=1920
+        #h=1080
+except:
+    pass
+
+if force or (objpoints is None):
+    objpoints = []
+    imgpoints = []
+    index=0
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+    objp=np.zeros((6*7,3),np.float32)
+    objp[:,:2]=np.mgrid[0:7,0:6].T.reshape(-1,2)
+    for fname in images:
+        img=cv2.imread(fname)
+        img=cv2.resize(img, (w,h))
+        gray=cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
+        #print(gray)
+        #cv2.imshow('gray',gray)
+        #cv2.waitKey(500)
         #cv2.destroyAllWindows()
-        
-        
-ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, gray2.shape[::-1],None,None)
+        ret, corners=cv2.findChessboardCorners(gray,(7,6),None)
+        print("At "+str(extractNumberFrom(fname)))
+        if ret == True:
+            objpoints.append(objp)
+            print(fname)
+            print('index: '+str(index))
+            cornersImg=cv2.cornerSubPix(gray,corners,(11,11),(-1,-1),criteria)
+            imgpoints.append(cornersImg)
+            index+=1
+            img=cv2.drawChessboardCorners(img,(7,6),cornersImg,ret)
+            #cv2.imshow('img', img)
+            #cv2.imwrite('ChessboardWorkingInitial'+str(index)+'.jpg',img)
+            cv2.imwrite('ChessboardWorkingDrawn'+str(index)+'.jpg',img)
+            #cv2.waitKey(500)
+            #cv2.destroyAllWindows()
+    np.savez("calib_serban.npz", obj=objpoints, img=imgpoints)
+
+#print(objpoints)
+#print(imgpoints)
+
+ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, (w,h),None,None)
+# hack to remove translation? to make ROI work below
+dist[0,2] = 0
+dist[0,3] = 0
+dist[0,4] = 0
+newcameramtx, roi=cv2.getOptimalNewCameraMatrix(mtx,dist,(w,h), 1.0, (640,360))
+print(roi)
+x,y,wd,hd=roi
 for fname in images:
     img=cv2.imread(fname)
-    h,w=img.shape[:2]
-    newcameramtx, roi=cv2.getOptimalNewCameraMatrix(mtx,dist,(w,h),1,(w,h))
+    img=cv2.resize(img, (w,h))
+    t0=time.time()
     dst=cv2.undistort(img,mtx,dist,None,newcameramtx)
-    x,y,w,h=roi
-    #dst=dst[y:y+h,x:x+w]
+    t1=time.time()
+    dst=dst[y:y+hd,x:x+wd]
+    t2=time.time()
+    print("Undistort:"+str(t1-t0))
+    print("Slice:"+str(t2-t1))
     number=extractNumberFrom(fname)
-    cv2.imwrite('CalibrationSerban/Worked/ChessboardUndistorted'+str(number)+'.jpg',dst)
+    cv2.imwrite('CalibrationSerban/Worked/'+str(number)+'Undistorted.jpg',dst)
 
 print('Done')
-cv2.destroyAllWindows()
+cv2.destroyAllWindows() 
