@@ -100,17 +100,22 @@ for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=
         #ret, image = cv2.threshold(image, 15, 255, cv2.THRESH_BINARY)
         
     #todo: crop image to select only moving parts
-    image = cv2.Canny(image,cannyMin,cannyMax)
+    #image = cv2.Canny(image,cannyMin,cannyMax)
     #ret, image = cv2.threshold(image, 15, 255, cv2.THRESH_BINARY)
-    cont, hierarchy = cv2.findContours(image, cv2.RETR_LIST, cv2.CHAIN_APPROX_TC89_L1)
+    
+    cont, hierarchy = cv2.findContours(image, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    
     fingers = []
     maxPts = 0
-    for points in cont:
-        if len(cont) > 35: break
-        maxPts = max(maxPts, len(points))
-        if len(points) > 100: break
+    maxIdx = -1
+    for idx,points in enumerate(cont):
+        if len(cont) > 50: break
+        if maxPts < len(points):
+            maxPts = len(points)
+            maxIdx = idx
+        """
         if len(points) < 2: continue
-        
+        if len(points) > 100: break
         isFinger = True
         length = 0.0
         for i,pt in enumerate(points):
@@ -130,11 +135,14 @@ for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=
             #find finger-like point sequences
             #print(points)
             fingers.append(points)
+        """
     print( len(cont), maxPts)
-    for idx,fgr in enumerate(cont):
-        image = cv2.drawContours(image, cont, idx, (64 + 16 * idx), 2)
-        
-    lines = cv2.HoughLinesP(image, 4, np.pi / 180, 15, None, 2, 2)
+    #for idx,fgr in enumerate(cont):
+    #    image = cv2.drawContours(image, cont, idx, (64 + 16 * idx), 2)
+    #image = cv2.drawContours(image, cont, -1, (64), 1)
+    #if maxIdx != -1:
+    #    image = cv2.drawContours(image, cont, maxIdx, (128), 2)
+    #lines = cv2.HoughLinesP(image, 4, np.pi / 180, 15, None, 2, 2)
     if False and lines is not None:
         for line in lines:
             for x1,y1,x2,y2 in line:
@@ -162,6 +170,8 @@ for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=
             g = camera.awb_gains
             camera.awb_mode = 'off'
             camera.awb_gains = g
+    #if key == ord("c"):
+    #    cChain = (cChain + 1) % 3
     # clear the stream in preparation for the next frame
     rawCapture.truncate(0)
     if key == ord("q"):
