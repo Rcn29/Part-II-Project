@@ -14,6 +14,8 @@ import glob
 
 camera_width=1920
 camera_height=1080
+folderName='MorningBigHandTest/'
+sampleSaved=False
 
 def SaveImg(filename, imageArray):
     imageArray = cv2.flip(imageArray, 0);
@@ -34,7 +36,7 @@ camera.awb_mode = 'off'
 camera.awb_gains = g
 camera.capture(background,format='bgr', use_video_port=True)
 print("Bg Done")
-SaveImg("NaturalLight/Background.ppm",background.array)
+SaveImg(folderName+'HandSample.jpg',background.array)
 #cv2.imshow("Background",grayground)
 time.sleep(4)
 cv2.destroyAllWindows()
@@ -51,7 +53,7 @@ for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=
     print("Captured " + str(index))
     # show the frame
     #cv2.imshow("Frame", image)
-    SaveImg("NaturalLight/Frame"+ str(index) +".ppm",image)
+    #SaveImg(folderName+'Frame'+ str(index) +'.jpg',image)
     key = cv2.waitKey(1) & 0xFF
     # clear the stream in preparation for the next frame
     rawCapture.truncate(0)

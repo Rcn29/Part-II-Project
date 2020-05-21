@@ -32,6 +32,7 @@ def updateMotion(image):
         t = snapSpeed
         if motionHist is None:
             motionHist = motionImg.copy()
+        #cv2.accumulateWeighted( motionImg, motionHist, t)
         motionHist = cv2.addWeighted( motionHist, 1.0 - t, motionImg, t, 0.0)
         motionHist = cv2.dilate(motionHist, dilateMotion)
         _, motionMask = cv2.threshold(motionHist, 15, 255, cv2.THRESH_BINARY)

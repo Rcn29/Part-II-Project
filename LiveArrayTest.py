@@ -12,6 +12,8 @@ import time
 import numpy as np
 import glob
 import MotionMask
+from pathlib import Path
+from math import sqrt
 
 def stopCameraAutos(camera):
     camera.shutter_speed = camera.exposure_speed
@@ -55,32 +57,120 @@ flexMin = 0.98
 flexMax = 1.02
 adjusting = True # picking threshold values
 cycle = 0 # cycle through displayed images
+lastMovingIsland=None
+testToggle = False
+lastFingers = []
+goodFingers = []
 
-def subimg(img, sz, px,py):
-    szh=int(sz * 0.5)
-    x1 = px-szh
-    x2 = px+szh
-    y1 = py-szh
-    y2 = py+szh
-    return img[y1:y1+sz,x1:x1+sz,:]
+crtFrame=0
+doPrint=False
+folderName='TestNumber'
+try:
+    with np.load("testnumber.npz") as numberFile:
+        testNumber=numberFile["nr"]
+except:
+    testNumber=2
 
-def writesubimg(src, dst, sz, px,py):
-    szh=int(sz * 0.5)
-    x1 = px-szh
-    x2 = px+szh
-    y1 = py-szh
-    y2 = py+szh
-    dst[y1:y1+sz,x1:x1+sz,:] &= src
+def fingerDists(p1,p2,p3):
+    p21 = p2-p1
+    baseD = np.linalg.norm(p21)
+    #distance from p3 to line [p1,p2]
+    farD = np.linalg.norm(np.cross(p21, p1-p3)) / baseD
+    return farD,baseD
 
-dilateCanny = np.ones((2,2), np.uint8)
-erodeMask = np.ones((2 + 3 * inputScale,2 + 3 * inputScale), np.uint8)
+def findFingers(conts, image, roi):
+    fingers = []
+    bArea = 0
+    if len(conts) > 10:
+        return fingers, bArea
+    
+    for cont in conts:
+        cv2.drawContours(image, [cont], -1, (0, 0, 200), 1)
+        hull = cv2.convexHull(cont, returnPoints=False)
+        if len(hull) == 0:
+            continue
+        hull = np.hstack(hull)
+        hullPts = cont[hull]
+        hullArea = cv2.contourArea(hullPts)
+        if hullArea > bArea:
+            bCont = cont
+            bHull = hull
+            bHullPts = hullPts
+            bArea = hullArea
+            
+    if bArea is not 0:
+        hullPts = bHullPts
+        cont = bCont
+        hull = bHull
+        cv2.drawContours(image, [hullPts], -1, (250, 0, 200), 4)
+        defects = cv2.convexityDefects(cont, hull)
+        if defects is not None:
+            maybe = []
+            lastEnd = None
+            #print(len(defects))
+            for defect in defects:
+                st,end,far,depth = defect[0]
+                #thisEnd = conts[st][0]
+                #if (lastEnd is not None and np.linalg.norm(thisEnd - lastEnd) < 15 ):
+                #    fingers.append( tuple(thisEnd))
+                #lastEnd = thisEnd
+                # work out actual depth
+                p1 = cont[st][0]
+                p2 = cont[end][0]
+                p3 = cont[far][0]
+                farD,baseD = fingerDists(p1,p2,p3)
+                if farD > 0.1*baseD and farD > 5:
+                    if st not in maybe:
+                        maybe.append(st)
+                    if end not in maybe:
+                        maybe.append(end)
+                    cv2.circle(image, tuple(p3), 2, (200,200,200), 2)
+                    cv2.circle(image, tuple(p1), 2, (50,200,50), 2)
+                    cv2.circle(image, tuple(p2), 2, (50,200,50), 2)
+            # merge close candidates
+            mergeDist = 8 * (sqrt(bArea) / 50)
+            i = 0
+            num = len(maybe)
+            m = maybe
+            while i < num:
+                j = i+1
+                p = cont[m[i]][0]
+                # skip edge points
+                if min(abs(p[0] - roi[0]), abs(roi[1] - p[0])) < 5 or \
+                    min(abs(p[1] - roi[2]), abs(roi[3] - p[1])) < 5:
+                    i+=1
+                    continue
+                # remove other close pts
+                while j < num:
+                    p2 = cont[m[j]][0]
+                    if np.linalg.norm(p - p2) < mergeDist:
+                        cont[m[j]][0] = cont[m[num-1]][0]
+                        num -= 1
+                    else:
+                        j+=1
+                i+=1
+                fingers.append(p)
+            #for midx in maybe:
+            #    fingers.append( tuple(conts[midx][0]))
+    return fingers, bArea
+
+def subimg(img, roi):
+    return img[roi[2]:roi[3], roi[0]:roi[1],:]
+
+def writesubimg(src, dst, roi):
+    dst[roi[2]:roi[3], roi[0]:roi[1],:] &= src
+
+dilateCanny = np.ones((5,5), np.uint8)
+erodeMask = np.ones((0 + 1 * inputScale,0 + 1 * inputScale), np.uint8)
 
 def readThreshValues(sz, px, py, img, imgHSV, show):
     global minT
     global maxT
     global midH
     
-    sub = subimg(imgHSV, sz,px,py)
+    szh=int(sz * 0.5)
+    roi = (px-szh, px+szh,py-szh,py+szh)
+    sub = subimg(imgHSV, roi)
     sub = cv2.GaussianBlur(sub, (1 + 2*inputScale, 1 + 2*inputScale), 0)
     # create Hue & Value edges
     cnyMin = 80
@@ -88,12 +178,16 @@ def readThreshValues(sz, px, py, img, imgHSV, show):
     cny = cv2.Canny(sub[:,:,0], cnyMin, cnyMax, 7)
     cny = cv2.bitwise_or(cny, cv2.Canny(sub[:,:,1], cnyMin, cnyMax, 7))
     cny = cv2.bitwise_or(cny, cv2.Canny(sub[:,:,2], cnyMin, cnyMax, 7))
-    cny = cv2.dilate(cny, dilateCanny)
+    if show:
+        cv2.imshow("Cny", cny)
+    cny = cv2.morphologyEx(cny, cv2.MORPH_CLOSE, dilateCanny)  #cv2.dilate(cny, dilateCanny) #dilate to make contours more watertight
+    if show:
+        cv2.imshow("Cny Close", cny)
     #cny = cv2.GaussianBlur(cny, (3,3), 0)
     #cv2.copyMakeBorder(cny,1,1,1,1, cv2.BORDER_ISOLATED | cv2.BORDER_CONSTANT, cny,(255))
-    if show:
-        cv2.imshow("Sub", sub[:,:,2])
-        cv2.imshow("Cny", cny)
+    #if show:
+    #    cv2.imshow("Sub", sub[:,:,2])
+    #    cv2.imshow("Cny", cny)
     # fill area edges to get inverted hand outline 
     cv2.floodFill(cny, None,(0,0),(64))
     cv2.floodFill(cny, None,(sz -1,sz -1),(64))
@@ -104,25 +198,43 @@ def readThreshValues(sz, px, py, img, imgHSV, show):
     cny = cny ^ (255)
     cny = cv2.erode(cny, erodeMask)
     #cny = cv2.dilate(cny, erodeMask)
-    if show:
-        cv2.imshow("Flood", cny)
+    #if show:
+    #    cv2.imshow("Flood", cny)
     
     # preview over image
     bla = cv2.cvtColor(cny, cv2.COLOR_GRAY2BGR)
-    writesubimg(bla, img, sz, px,py)
+    writesubimg(bla, img, roi)
     
     # use masked pixels to guess hand colors
     for i in range(3):
         minV,maxV,_,_ = cv2.minMaxLoc( sub[:,:,i], cny)
         minT[i] = minV# * flexMin
         maxT[i] = maxV# * flexMax
+    if True:
+        # use masked HSV histogram to guess hand color
+        #channels = [0 ,1,2]
+        #histSize = [180, 50, 50]
+        #ranges = [0,179,0,255,0,255]
+        #hist = cv2.calcHist( [sub],[0,1,2], cny, histSize, ranges)
+        histHue = cv2.calcHist( [sub],[0], cny, [180], [0,179])
+        mostCommonHue = np.argmax(histHue) # pick most common hue
+        midH = int(mostCommonHue)
+        # render histogram
+        for i in range(180):
+            cv2.rectangle(img, (10 + i * 2, 95), (12 + i*2, 95 + histHue[i]), (200, 200,200), 1)
+    else:
+        # pick middle HUE between extremes
+        dist=maxT[0]-minT[0]
+        if dist > 90.0:
+            dist = dist - 180
+        midH = minT[0] + dist * 0.5
+        if midH < 0:
+            midH += 180
         
-    dist=maxT[0]-minT[0]
-    if dist>90.0:#Wraps around
-        dist = dist - 180
-    midH = minT[0] + dist * 0.5
-    if midH < 0:
-        midH += 180
+    #minT[2] = 0
+    #maxT[2] = 255
+    # return ROI
+    return roi
 
 # capture frames from the camera
 for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True):
@@ -132,71 +244,109 @@ for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=
     image = np.array(frame.array)
     #image = image[ 250:750, 700:1400,:]
     image = cv2.flip(image,-1)
+    originalImage=image.copy()
     #image =cv2.GaussianBlur(image, (3,3), 0)
     imageHSV = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     #print("Capture " + str(time.time() - t0))
     
     # mask moving pixles
     MotionMask.updateMotion(image)
+    # keep good fingers around
+    for finger in lastFingers:
+        s = 5
+        sc = 1 / MotionMask.scaleFactor
+        #print(finger)
+        st = (int(finger[0]*sc)-s, int(finger[1]*sc)-s)
+        end= (int(finger[0]*sc)+s, int(finger[1]*sc)+s)
+        cv2.rectangle(MotionMask.motionMask, st, end,(255), 5)
     
     # threshold adjust square
     cx = int(inputW * 0.5)
     cy = int(inputH * 0.5)
     sz = 40 * inputScale
-    szh=int(sz/2)
-    x1 = cx-szh
-    x2 = cx+szh
-    y1 = cy-szh
-    y2 = cy+szh
+    adjustROI = None
     if adjusting:
-        """
-        for i in range(3):
-            imageH = imageHSV[y1:y1+sz,x1:x1+sz, i]
-            minV,maxV,_,_ = cv2.minMaxLoc( imageH)
-            minT[i] = minV * flexMin
-            maxT[i] = maxV * flexMax
-        """
-        readThreshValues(sz, cx,cy, image, imageHSV, show=True) 
+        adjustROI = readThreshValues(sz, cx,cy, image, imageHSV, show=True) 
     
     # find individual motion islands
     islands, _ = cv2.findContours(MotionMask.motionMask, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     for ct in islands: 
         ct *= 4    
     
+    if len(islands):
+        lastMovingIsland = None
+    elif lastMovingIsland is not None:
+        islands.append(lastMovingIsland)
+    
     #find contours inside each island
-    for island in islands:
+    for island in islands:        
+        if lastMovingIsland is None:
+            lastMovingIsland = island
+        if adjusting:
+            continue
         x,y,w,h = cv2.boundingRect(island)
         cv2.rectangle(image, (x,y),(x+w,y+h), (200,0,0))
+        #todo: if rectangle is larger than 320x180, scale it down
         
         subHSV = imageHSV[y:y+h,x:x+w,:]
         # replace H channel with a "distance from hand hue" value
         hd = cv2.absdiff( subHSV[:,:,0], (midH))
         hd = cv2.min(hd, (180) - hd)
         subHSV[:,:,0] = hd
-        subThresh = cv2.inRange(subHSV, (0, minT[1], minT[2]), (20, maxT[1], maxT[2]))
-        subThresh = cv2.GaussianBlur(subThresh, (3,3), 0)
+        subThresh = cv2.inRange(subHSV, (0, minT[1], minT[2]), (10, maxT[1], maxT[2]))
+        #subThresh = cv2.GaussianBlur(subThresh, (3,3), 0)
         
-        #subMask = cv2.cvtColor(subThresh, cv2.COLOR_GRAY2BGR)
+        cntSrc = subThresh
+        
+        if False:
+            subMasked = subHSV & cv2.cvtColor(subThresh, cv2.COLOR_GRAY2BGR) 
+            c1 = 60
+            c2 = 140
+            subcny = cv2.Canny(subMasked[:,:,0], c1, c2)
+            subcny = subcny | cv2.Canny(subMasked[:,:,1], c1, c2)
+            subcny = subcny | cv2.Canny(subMasked[:,:,2], c1, c2)
+            cntSrc = subcny
+            
+        #
         #cv2.imshow("Smask", subMask)
         #image[y:y+h,x:x+w,:] = subMask
+        morphKernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5))
+        cntSrc = cv2.morphologyEx(cntSrc, cv2.MORPH_CLOSE, morphKernel)
         
-        conts, _ = cv2.findContours(subThresh, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE, offset=(x,y))
-        cv2.drawContours(image, conts, -1, (0, 0, 200), 2)
-        if len(conts):
-            allConts = np.concatenate(conts)
-            #cv2.drawContours(image, [allConts], -1, (0, 0, 200), 2)
-            hull = cv2.convexHull(allConts, returnPoints=False)
-            if len(hull):
-                hullPts = allConts[hull]
-                cv2.drawContours(image, hullPts, -1, (250, 0, 200), 4)        
-                defects = cv2.convexityDefects(allConts, hull)
-                if defects is not None:
-                    for defect in defects:
-                        st,end,far,depth = defect[0]
-                        #far = defect
-                        #print(allConts[far])
-                        if depth > 5:
-                            cv2.circle(image, tuple(allConts[far][0]), 2, (200,200,200), 2)
+        roi = (x, x+w, y, y+h)
+        
+        subMask = cv2.cvtColor(cntSrc, cv2.COLOR_GRAY2BGR)
+        writesubimg( subMask, image, roi)
+        
+        conts, _ = cv2.findContours(cntSrc, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_KCOS, offset=(x,y))
+        #cv2.drawContours(image, conts, -1, (0, 0, 200), 2)
+        numConts = len(conts)
+        if numConts:
+            fingers, handArea = findFingers(conts, image, roi)
+            #lastFingers
+            # compare new finger list with old one
+            # and keep only close enough fingers
+            # use hand area to adjust movement sensitivity
+            #NOTE: assumes max speed of 1 hand per sec @0.1 FPS
+            maxMove = max( 6, 1.0 * sqrt(handArea))
+            #print(maxMove)
+            goodFingers = fingers
+            #todo: could keep a frame count along with old fingers
+            #  and decrement it every frame they are missing from new list
+            #  ? will this help keep them visible when standing still ?
+            if False: # keep only stable fingers test
+                for new in fingers:
+                    for old in lastFingers:
+                        if np.linalg.norm(new - old) < maxMove:
+                            goodFingers.append(new) # found good candidate
+                            break
+            lastFingers = fingers
+            if len(goodFingers):
+                #fCenter, fR = cv2.minEnclosingCircle( np.array(goodFingers))
+                #cv2.circle(image, tuple(fCenter), int(fR), (255,0,255),1)
+                for finger in goodFingers:
+                    #cv2.circle(image, tuple(conts[far][0]), 2, (200,200,200), 2)
+                    cv2.circle(image, tuple(finger), 5, (0,0,255), 2)
     
     # draw masked image
     if False:
@@ -212,10 +362,19 @@ for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=
     
     #print("Mask " + str(time.time() - t0))
     
-    image = cv2.drawContours(image, islands, -1, (0, 200,0), 1)
+    if not adjusting:
+        image = cv2.drawContours(image, islands, -1, (0, 200,0), 1)
     
-    if adjusting:
-        cv2.rectangle(image, (x1,y1),(x2,y2), (0,200,0), 2)
+    # picking square
+    if adjustROI:
+        x1,x2,y1,y2 = adjustROI;
+        cv2.rectangle(image, (x1,y1),(x2,y2), (0,200,0), 1)
+        cv2.rectangle(image, (x1,y1),(x1+2,y1+2), (0,0,200), 4)
+        cv2.rectangle(image, (x2-2,y2-2),(x2,y2), (0,0,200), 4)
+        cv2.rectangle(image, (x1,y2-2),(x1+2,y2), (0,0,200), 4)
+        cv2.rectangle(image, (x2-2,y1),(x2,y1+2), (0,0,200), 4)        
+        
+    cv2.rectangle(image, (40, 75),(250, 70 + inputScale * 13), (200,200,200), -1)
     cv2.putText( image,
      "Hue " + str(minT) + " " + str(maxT), (40, 40),
      cv2.FONT_HERSHEY_SIMPLEX, #font family
@@ -249,6 +408,12 @@ for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=
     
     t1=time.time()
     print(str(t1-t0))
+    if doPrint and adjusting==False and crtFrame<=30:
+        cv2.imwrite(folderName+str(testNumber)+"/Frame"+str(crtFrame)+".ppm",originalImage)
+        print("Wrote frame number " + str(crtFrame) + " to path" + folderName+str(testNumber))
+        crtFrame+=1
+        if crtFrame>30:
+            doPrint=False
     
     key = cv2.waitKey(1) & 0xFF
     # clear the stream in preparation for the next frame
@@ -256,8 +421,18 @@ for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=
     if key == ord("s"):
         adjusting = not adjusting
         stopCameraAutos(camera)
+        if doPrint and adjusting==False:
+            testNumber+=1
+            Path(folderName+str(testNumber)).mkdir(parents=True, exist_ok=True)
+            cv2.imwrite(folderName+str(testNumber)+"/HandSample.ppm",originalImage)
+            crtFrame=0
+            np.savez("testnumber.npz",nr=testNumber)
     if key == ord("m"):    
         cycle = (cycle + 1) % 6
+    if key == ord("t"):
+        testToggle = not testToggle
     if key == ord("q"):
         break
+    if key == ord("p"):
+        doPrint=True
 cv2.destroyAllWindows()
