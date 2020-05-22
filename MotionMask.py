@@ -9,9 +9,7 @@ import cv2
 from picamera.array import PiRGBArray
 import numpy as np
 
-#todo: keep motion histogram in half/quarter resolution so it's faster
-
-snapSpeed = 0.3
+snapSpeed = 0.5
 #NOTE: All of these images are lower resolution than input
 scaleFactor = 4
 prevImage = None # unmodified previous frame contents

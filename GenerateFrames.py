@@ -12,8 +12,8 @@ import time
 import numpy as np
 import glob
 
-camera_width=1920
-camera_height=1080
+camera_width=1024
+camera_height=768
 folderName='MorningBigHandTest/'
 sampleSaved=False
 
@@ -36,7 +36,7 @@ camera.awb_mode = 'off'
 camera.awb_gains = g
 camera.capture(background,format='bgr', use_video_port=True)
 print("Bg Done")
-SaveImg(folderName+'HandSample.jpg',background.array)
+SaveImg('Background.jpg',background.array)
 #cv2.imshow("Background",grayground)
 time.sleep(4)
 cv2.destroyAllWindows()
@@ -58,5 +58,5 @@ for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=
     # clear the stream in preparation for the next frame
     rawCapture.truncate(0)
     # if the `q` key was pressed, break from the loop
-    if index==31:
+    if index==1:
         break

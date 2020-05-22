@@ -14,6 +14,8 @@ import glob
 import MotionMask
 from pathlib import Path
 from math import sqrt
+import matplotlib.pyplot as plt
+import TestHelper as tst
 
 def stopCameraAutos(camera):
     camera.shutter_speed = camera.exposure_speed
@@ -37,20 +39,7 @@ rawCapture.truncate(0)
 #time.sleep(3.0)
 #stopCameraAutos(camera)
 
-"""
-cv2.namedWindow("Frame")
-cannyMin = 80
-cannyMax = 140
-def trackMin(v) :
-    global cannyMin
-    cannyMin = v
-def trackMax(v) :
-    global cannyMax
-    cannyMax = v
-#cv2.createTrackbar("Canny Min", "Frame" , cannyMin, 500, trackMin)
-#cv2.createTrackbar("Canny Max", "Frame" , cannyMax, 500, trackMax)
-"""
-
+#bgImage = np.zeros((inputH,inputW,3), np.uint8)
 minT = [1,2,3]
 maxT = [1,2,3]
 flexMin = 0.98
@@ -61,6 +50,7 @@ lastMovingIsland=None
 testToggle = False
 lastFingers = []
 goodFingers = []
+wholeImage=False
 
 crtFrame=0
 doPrint=False
@@ -69,7 +59,9 @@ try:
     with np.load("testnumber.npz") as numberFile:
         testNumber=numberFile["nr"]
 except:
-    testNumber=2
+    testNumber=6
+fakeFrames = None
+
 
 def fingerDists(p1,p2,p3):
     p21 = p2-p1
@@ -119,7 +111,7 @@ def findFingers(conts, image, roi):
                 p2 = cont[end][0]
                 p3 = cont[far][0]
                 farD,baseD = fingerDists(p1,p2,p3)
-                if farD > 0.1*baseD and farD > 5:
+                if farD > 0.15*baseD and farD > 5:
                     if st not in maybe:
                         maybe.append(st)
                     if end not in maybe:
@@ -208,8 +200,8 @@ def readThreshValues(sz, px, py, img, imgHSV, show):
     # use masked pixels to guess hand colors
     for i in range(3):
         minV,maxV,_,_ = cv2.minMaxLoc( sub[:,:,i], cny)
-        minT[i] = minV# * flexMin
-        maxT[i] = maxV# * flexMax
+        minT[i] = int(minV)# * flexMin
+        maxT[i] = int(maxV)# * flexMax
     if True:
         # use masked HSV histogram to guess hand color
         #channels = [0 ,1,2]
@@ -220,8 +212,19 @@ def readThreshValues(sz, px, py, img, imgHSV, show):
         mostCommonHue = np.argmax(histHue) # pick most common hue
         midH = int(mostCommonHue)
         # render histogram
-        for i in range(180):
-            cv2.rectangle(img, (10 + i * 2, 95), (12 + i*2, 95 + histHue[i]), (200, 200,200), 1)
+        def drawHist(hist, x, y):
+            for i in range( len(hist)):
+                cv2.rectangle(img, (x + i * 2, y), (x + 2 + i*2, y + hist[i]), (200, 200,200), -1)
+        
+        drawHist(histHue, 10, 95)
+        #for i in range(180):
+        #    cv2.rectangle(img, (10 + i * 2, 95), (12 + i*2, 95 + histHue[i]), (200, 200,200), -1)
+        histS = cv2.calcHist( [sub],[1], cny, [128], [0,255])
+        drawHist(histS, 400, 95)
+        cv2.rectangle(img, (400 + minT[1], 85), (400 + maxT[1], 95), (0, 128,0), -1)
+        histV = cv2.calcHist( [sub],[2], cny, [128], [0,255])
+        drawHist(histV, 610, 95)
+        cv2.rectangle(img, (610 + minT[2], 85), (610 + maxT[2], 95), (0, 128,0), -1)
     else:
         # pick middle HUE between extremes
         dist=maxT[0]-minT[0]
@@ -231,8 +234,8 @@ def readThreshValues(sz, px, py, img, imgHSV, show):
         if midH < 0:
             midH += 180
         
-    #minT[2] = 0
-    #maxT[2] = 255
+    minT[2] = 0
+    maxT[2] = 255
     # return ROI
     return roi
 
@@ -241,17 +244,22 @@ for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=
     # grab the raw NumPy array representing the image, then initialize the timestamp
     # and occupied/unoccupied text
     t0=time.time()
-    image = np.array(frame.array)
-    #image = image[ 250:750, 700:1400,:]
-    image = cv2.flip(image,-1)
+    
+    if fakeFrames is None:
+        image = np.array(frame.array)
+        #image = image[ 250:750, 700:1400,:]
+        image = cv2.flip(image,-1)
+    else:
+        image = fakeFrames.next().copy()
+        
     originalImage=image.copy()
     #image =cv2.GaussianBlur(image, (3,3), 0)
-    imageHSV = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     #print("Capture " + str(time.time() - t0))
     
     # mask moving pixles
     MotionMask.updateMotion(image)
     # keep good fingers around
+    """
     for finger in lastFingers:
         s = 5
         sc = 1 / MotionMask.scaleFactor
@@ -259,7 +267,14 @@ for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=
         st = (int(finger[0]*sc)-s, int(finger[1]*sc)-s)
         end= (int(finger[0]*sc)+s, int(finger[1]*sc)+s)
         cv2.rectangle(MotionMask.motionMask, st, end,(255), 5)
-    
+    """
+    # failed bg test
+    if False and not adjusting:
+        mask = cv2.resize(MotionMask.motionMask, (inputW, inputH), cv2.INTER_NEAREST)
+        mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+        bgImage = (image & ~mask) + (bgImage & mask)
+
+    imageHSV = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     # threshold adjust square
     cx = int(inputW * 0.5)
     cy = int(inputH * 0.5)
@@ -286,38 +301,49 @@ for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=
             continue
         x,y,w,h = cv2.boundingRect(island)
         cv2.rectangle(image, (x,y),(x+w,y+h), (200,0,0))
+        if (w*h>int(inputW*inputH*0.5)):
+            continue
         #todo: if rectangle is larger than 320x180, scale it down
-        
-        subHSV = imageHSV[y:y+h,x:x+w,:]
-        # replace H channel with a "distance from hand hue" value
-        hd = cv2.absdiff( subHSV[:,:,0], (midH))
-        hd = cv2.min(hd, (180) - hd)
-        subHSV[:,:,0] = hd
-        subThresh = cv2.inRange(subHSV, (0, minT[1], minT[2]), (10, maxT[1], maxT[2]))
-        #subThresh = cv2.GaussianBlur(subThresh, (3,3), 0)
-        
-        cntSrc = subThresh
-        
-        if False:
-            subMasked = subHSV & cv2.cvtColor(subThresh, cv2.COLOR_GRAY2BGR) 
-            c1 = 60
-            c2 = 140
-            subcny = cv2.Canny(subMasked[:,:,0], c1, c2)
-            subcny = subcny | cv2.Canny(subMasked[:,:,1], c1, c2)
-            subcny = subcny | cv2.Canny(subMasked[:,:,2], c1, c2)
-            cntSrc = subcny
+        if not wholeImage:
+            subHSV = imageHSV[y:y+h,x:x+w,:]
+            #
+            if False: # failed bg removal test
+                subHSVBg = bgImage[y:y+h,x:x+w,:]
+                subHSVBg = cv2.cvtColor(subHSVBg, cv2.COLOR_BGR2HSV)
+                # select unchanged pixels and flip the mask
+                bgThresh = 255 - cv2.inRange(cv2.absdiff(subHSVBg, subHSV),(0,0,0), (255, 30,30))
+                morphKernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(3,3))
+                bgThresh = cv2.erode(bgThresh, morphKernel)
+                image[y:y+h,x:x+w,:] &= cv2.cvtColor(bgThresh, cv2.COLOR_GRAY2BGR)
             
-        #
-        #cv2.imshow("Smask", subMask)
-        #image[y:y+h,x:x+w,:] = subMask
-        morphKernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5))
-        cntSrc = cv2.morphologyEx(cntSrc, cv2.MORPH_CLOSE, morphKernel)
-        
-        roi = (x, x+w, y, y+h)
-        
-        subMask = cv2.cvtColor(cntSrc, cv2.COLOR_GRAY2BGR)
-        writesubimg( subMask, image, roi)
-        
+            # replace H channel with a "distance from hand hue" value
+            hd = cv2.absdiff( subHSV[:,:,0], (midH))
+            hd = cv2.min(hd, (180) - hd)
+            subHSV[:,:,0] = hd
+            subThresh = cv2.inRange(subHSV, (0, minT[1], minT[2]), (10, maxT[1], maxT[2]))
+            #subThresh = cv2.GaussianBlur(subThresh, (3,3), 0)
+            
+            cntSrc = subThresh
+            
+            if False:
+                subMasked = subHSV & cv2.cvtColor(subThresh, cv2.COLOR_GRAY2BGR) 
+                c1 = 60
+                c2 = 140
+                subcny = cv2.Canny(subMasked[:,:,0], c1, c2)
+                subcny = subcny | cv2.Canny(subMasked[:,:,1], c1, c2)
+                subcny = subcny | cv2.Canny(subMasked[:,:,2], c1, c2)
+                cntSrc = subcny
+                
+            #
+            #cv2.imshow("Smask", subMask)
+            #image[y:y+h,x:x+w,:] = subMask
+            morphKernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5))
+            cntSrc = cv2.morphologyEx(cntSrc, cv2.MORPH_CLOSE, morphKernel)
+            
+            roi = (x, x+w, y, y+h)
+            
+            subMask = cv2.cvtColor(cntSrc, cv2.COLOR_GRAY2BGR)
+            writesubimg( subMask, image, roi)        
         conts, _ = cv2.findContours(cntSrc, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_KCOS, offset=(x,y))
         #cv2.drawContours(image, conts, -1, (0, 0, 200), 2)
         numConts = len(conts)
@@ -329,11 +355,6 @@ for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=
             # use hand area to adjust movement sensitivity
             #NOTE: assumes max speed of 1 hand per sec @0.1 FPS
             maxMove = max( 6, 1.0 * sqrt(handArea))
-            #print(maxMove)
-            goodFingers = fingers
-            #todo: could keep a frame count along with old fingers
-            #  and decrement it every frame they are missing from new list
-            #  ? will this help keep them visible when standing still ?
             if False: # keep only stable fingers test
                 for new in fingers:
                     for old in lastFingers:
@@ -341,11 +362,10 @@ for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=
                             goodFingers.append(new) # found good candidate
                             break
             lastFingers = fingers
-            if len(goodFingers):
+            if len(fingers):
                 #fCenter, fR = cv2.minEnclosingCircle( np.array(goodFingers))
                 #cv2.circle(image, tuple(fCenter), int(fR), (255,0,255),1)
-                for finger in goodFingers:
-                    #cv2.circle(image, tuple(conts[far][0]), 2, (200,200,200), 2)
+                for finger in fingers:
                     cv2.circle(image, tuple(finger), 5, (0,0,255), 2)
     
     # draw masked image
@@ -394,7 +414,7 @@ for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=
     if (cycle == 0):
         cv2.imshow("Frame", image)
     #if (cycle == 1):
-    #    cv2.imshow("Frame", imageThresh)
+    #    cv2.imshow("Frame", bgImage)
     #if (cycle == 2):
     #    cv2.imshow("Frame", imageMasked)
     if (cycle == 3):
@@ -405,20 +425,31 @@ for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=
         cv2.imshow("Frame", imageHSV[:,:,2])
     if (cycle == 6):
         pass
-    
     t1=time.time()
-    print(str(t1-t0))
-    if doPrint and adjusting==False and crtFrame<=30:
+    frameTime = t1-t0
+    print(str(frameTime))
+    if fakeFrames and not adjusting:
+        fakeFrames.frameTimes[fakeFrames.li] = frameTime
+        print(" F: " + str(fakeFrames.li))        
+        cv2.imwrite(folderName+str(fakeFrames.testNum)+"/Frame"+str(fakeFrames.li)+".jpg",image)
+        if fakeFrames.i == 10 and fakeFrames.li == 11:
+            np.savetxt(folderName+str(fakeFrames.testNum)+"/_times.txt", fakeFrames.frameTimes)
+            print("Wrote " + str(fakeFrames.testNum))
+            fakeFrames = tst.loadTest(fakeFrames.testNum + 1)
+            adjusting = True
+            #cv2.waitKey(0)
+    
+    if doPrint and adjusting==False and crtFrame<=40:
         cv2.imwrite(folderName+str(testNumber)+"/Frame"+str(crtFrame)+".ppm",originalImage)
         print("Wrote frame number " + str(crtFrame) + " to path" + folderName+str(testNumber))
         crtFrame+=1
-        if crtFrame>30:
+        if crtFrame>40:
             doPrint=False
     
     key = cv2.waitKey(1) & 0xFF
     # clear the stream in preparation for the next frame
     rawCapture.truncate(0)
-    if key == ord("s"):
+    if key == ord("s") or (fakeFrames and fakeFrames.i == -1):
         adjusting = not adjusting
         stopCameraAutos(camera)
         if doPrint and adjusting==False:
@@ -427,12 +458,44 @@ for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=
             cv2.imwrite(folderName+str(testNumber)+"/HandSample.ppm",originalImage)
             crtFrame=0
             np.savez("testnumber.npz",nr=testNumber)
+        if fakeFrames is not None:
+            if not adjusting:
+                fakeFrames.i = 0
+            if adjusting:
+                fakeFrames.i = -1
     if key == ord("m"):    
         cycle = (cycle + 1) % 6
     if key == ord("t"):
         testToggle = not testToggle
+    if key == ord("r"):
+        wholeImage= not wholeImage
+    if wholeImage:
+        subHSV = imageHSV.copy()
+        flubHSV=imageHSV.copy()
+        # replace H channel with a "distance from hand hue" value
+        hd = cv2.absdiff( subHSV[:,:,0], (midH))
+        hd = cv2.min(hd, (180) - hd)
+        subHSV[:,:,0] = hd
+        subThresh = cv2.inRange(subHSV, (0, minT[1], minT[2]), (10, maxT[1], maxT[2]))
+        #subThresh = cv2.GaussianBlur(subThresh, (3,3), 0)
+
+        cntSrc = subThresh
+        morphKernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5))
+        cntSrc = cv2.morphologyEx(cntSrc, cv2.MORPH_CLOSE, morphKernel)
+
+        roi = (0, inputW, 0, inputH)
+
+        subMask = cv2.cvtColor(cntSrc, cv2.COLOR_GRAY2BGR)
+        writesubimg( subMask, flubHSV, roi)
+        cv2.imshow("ColorMasked",flubHSV)
     if key == ord("q"):
         break
     if key == ord("p"):
         doPrint=True
+    # saved tests
+    keyNum = 1 + key - ord("1")
+    if keyNum > 0 and keyNum < 10:
+        fakeFrames = tst.loadTest( keyNum)
+        adjusting = True
+    
 cv2.destroyAllWindows()
